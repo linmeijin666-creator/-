@@ -1,0 +1,7 @@
+{
+  "name": "Xiaoyuzhou Podcast Smart Notes",
+  "description": "An AI-powered podcast note-taking tool that automatically transcribes, highlights key points, and allows synced note-taking for Xiaoyuzhou FM links.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
