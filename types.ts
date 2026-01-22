@@ -1,5 +1,5 @@
 
-export type HighlightType = 'VIEWPOINT' | 'DATA' | 'QUOTE';
+export type HighlightType = 'VIEWPOINT' | 'DATA' | 'QUOTE' | 'USER_MARK';
 
 export interface Highlight {
   id: string;
@@ -15,6 +15,7 @@ export interface UserNote {
   selectedText: string;
   timestamp: number;
   createdAt: string;
+  isOnlyHighlight?: boolean; // 是否只是划线没有写想法
 }
 
 export interface PodcastNoteSession {

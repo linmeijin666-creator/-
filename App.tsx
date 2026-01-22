@@ -52,9 +52,7 @@ const App: React.FC = () => {
       setLoadingStep('正在提取音频真实地址...');
       const data = await performRealTranscription(url);
       
-      setLoadingStep('正在获取音频并由 Gemini 进行 AI 转录 (这可能需要 30-60 秒)...');
-      // Transcribe is part of performRealTranscription now
-      
+      setLoadingStep('Gemini 正在深度转录音频 (可能需要 15-30 秒)...');
       setLoadingStep('正在利用 AI 分析文字稿并提取核心精彩片段...');
       const highlights = await analyzeTranscript(data.transcript);
       
@@ -89,6 +87,49 @@ const App: React.FC = () => {
     setCurrentTime(time);
   };
 
+  const handleAction = (action: 'copy' | 'highlight' | 'note', text: string, range: Range) => {
+    if (!session) return;
+
+    if (action === 'copy') {
+      navigator.clipboard.writeText(text);
+      // 可选：添加一个小 Toast
+      return;
+    }
+
+    if (action === 'highlight') {
+      const newNote: UserNote = {
+        id: `highlight-${Date.now()}`,
+        text: '',
+        selectedText: text,
+        timestamp: currentTime,
+        createdAt: new Date().toISOString(),
+        isOnlyHighlight: true
+      };
+      updateNotes(newNote);
+      return;
+    }
+
+    if (action === 'note') {
+      setSelectedRange({ text, timestamp: currentTime });
+    }
+  };
+
+  const updateNotes = (newNote: UserNote) => {
+    if (!session) return;
+    const updatedSession = {
+      ...session,
+      notes: [newNote, ...session.notes],
+    };
+    setSession(updatedSession);
+    
+    const history = getHistory();
+    const index = history.findIndex((h: any) => h.id === session.id);
+    if (index !== -1) {
+      history[index] = updatedSession;
+      localStorage.setItem('podcast_history', JSON.stringify(history));
+    }
+  };
+
   const handleSaveNote = (noteText: string) => {
     if (!session || !selectedRange) return;
     
@@ -100,20 +141,7 @@ const App: React.FC = () => {
       createdAt: new Date().toISOString(),
     };
 
-    const updatedSession = {
-      ...session,
-      notes: [newNote, ...session.notes],
-    };
-
-    setSession(updatedSession);
-    
-    const history = getHistory();
-    const index = history.findIndex((h: any) => h.id === session.id);
-    if (index !== -1) {
-      history[index] = updatedSession;
-      localStorage.setItem('podcast_history', JSON.stringify(history));
-    }
-    
+    updateNotes(newNote);
     setSelectedRange(null);
   };
 
@@ -131,10 +159,14 @@ const App: React.FC = () => {
     
     content += `## 我的笔记\n\n`;
     session.notes.forEach(n => {
-      content += `> [${formatTime(n.timestamp)}] ${n.selectedText}\n\n${n.text}\n\n`;
+      if (n.isOnlyHighlight) {
+        content += `> [划线] [${formatTime(n.timestamp)}] ${n.selectedText}\n\n`;
+      } else {
+        content += `> [笔记] [${formatTime(n.timestamp)}] ${n.selectedText}\n\n${n.text}\n\n`;
+      }
     });
     
-    content += `## 完整文字稿\n\n${session.transcript}`;
+    content += `## 完整文字稿\n\n${session.transcript.replace(/\*\*/g, '')}`;
     
     const fileName = `${session.title}_笔记_${new Date().toISOString().split('T')[0]}.${format}`;
     downloadText(fileName, content);
@@ -142,18 +174,18 @@ const App: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
-        <div className="relative mb-10">
-          <div className="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-indigo-600"></div>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-white p-6">
+        <div className="relative mb-12">
+          <div className="w-32 h-32 border-4 border-indigo-50 border-t-indigo-600 rounded-full animate-spin"></div>
           <div className="absolute inset-0 flex items-center justify-center">
-             <i className="fas fa-podcast text-indigo-600 text-2xl animate-pulse"></i>
+             <i className="fas fa-microphone-lines text-indigo-600 text-3xl animate-pulse"></i>
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-slate-800 text-center mb-4">{loadingStep}</h2>
-        <div className="max-w-md w-full bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-           <div className="flex items-center space-x-3 text-slate-400 text-sm">
-              <i className="fas fa-spinner fa-spin text-indigo-500"></i>
-              <span>正在处理大型音频数据，这取决于您的网络和 Gemini 负载...</span>
+        <h2 className="text-3xl font-black text-slate-800 text-center mb-4 tracking-tight">{loadingStep}</h2>
+        <div className="max-w-md w-full bg-slate-50 p-6 rounded-3xl border border-slate-100">
+           <div className="flex items-center gap-4 text-slate-500 text-sm">
+              <div className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+              <span className="font-medium">AI 正在处理音频流。如果是长篇播客，Gemini 正在进行深度解析，请保持专注。</span>
            </div>
         </div>
       </div>
@@ -161,73 +193,84 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-200">
-              <i className="fas fa-podcast text-white"></i>
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-900">
+      <header className="sticky top-0 z-40 bg-white/70 backdrop-blur-xl border-b border-slate-200/60">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-100">
+              <i className="fas fa-podcast text-white text-lg"></i>
             </div>
-            <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              小宇宙智能笔记
-            </h1>
+            <div>
+              <h1 className="text-xl font-black tracking-tighter bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                小宇宙智能笔记
+              </h1>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Powered by Gemini 3.0</p>
+            </div>
           </div>
           <button 
             onClick={() => setShowHistory(true)}
-            className="text-slate-600 hover:text-indigo-600 transition-colors flex items-center space-x-1 font-medium bg-slate-100 px-3 py-1.5 rounded-lg"
+            className="group flex items-center gap-2 px-6 py-2.5 bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 transition-all shadow-sm hover:shadow-xl hover:shadow-indigo-500/5 active:scale-95"
           >
-            <i className="fas fa-history"></i>
-            <span className="text-sm">历史记录</span>
+            <i className="fas fa-box-archive text-slate-400 group-hover:text-indigo-600 transition-colors"></i>
+            <span className="text-sm font-black text-slate-600 group-hover:text-indigo-900">历史知识库</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+      <main className="flex-grow max-w-7xl mx-auto px-6 py-10 w-full">
         {!session ? (
-          <div className="max-w-3xl mx-auto mt-20 text-center">
-            <h2 className="text-4xl font-black text-slate-800 mb-6 tracking-tight">听播客，从未如此高效</h2>
-            <p className="text-slate-600 mb-12 text-xl leading-relaxed">
-              粘贴小宇宙链接，AI 深度转录音频，自动提取观点、数据与金句。
-              <br/><span className="text-indigo-500 font-semibold text-base mt-2 inline-block italic">基于 Gemini 3.0 的真·音频转文字技术</span>
-            </p>
-            <div className="bg-white p-3 rounded-3xl shadow-2xl border border-slate-100 flex flex-col sm:flex-row gap-3 transition-all hover:shadow-indigo-100/50">
+          <div className="max-w-4xl mx-auto mt-16 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="text-center mb-16">
+              <span className="px-5 py-2 bg-indigo-50 text-indigo-600 rounded-full text-xs font-black uppercase tracking-[0.2em] mb-8 inline-block shadow-sm">高效能学习工具</span>
+              <h2 className="text-5xl lg:text-7xl font-black text-slate-900 mb-8 tracking-tighter leading-[1] transition-all">
+                把每一场播客<br/><span className="text-indigo-600">沉淀为知识</span>
+              </h2>
+              <p className="text-slate-500 text-xl max-w-2xl mx-auto leading-relaxed font-medium">
+                AI 驱动的播客深度助手。提取核心观点、划线高亮文字、随时记录感悟，构建属于您的音频知识体系。
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-[3.5rem] shadow-2xl shadow-indigo-100/60 border border-slate-100 flex flex-col md:flex-row gap-5 mb-20 group transition-all hover:shadow-indigo-200/50">
               <input 
                 type="text"
-                placeholder="在此粘贴小宇宙节目链接 (URL)..."
+                placeholder="在此粘贴小宇宙节目链接 (Episode URL)..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
-                className="flex-grow px-6 py-4 rounded-2xl border-none focus:ring-2 focus:ring-indigo-100 outline-none text-slate-700 text-lg"
+                className="flex-grow px-10 py-6 rounded-[2.5rem] bg-slate-50 border-transparent focus:bg-white focus:ring-4 focus:ring-indigo-100 transition-all outline-none text-slate-800 text-lg font-bold placeholder:text-slate-300"
               />
               <button 
                 onClick={handleGenerate}
                 disabled={!url}
-                className="bg-indigo-600 text-white px-12 py-4 rounded-2xl font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg active:scale-95 whitespace-nowrap text-lg"
+                className="bg-indigo-600 text-white px-14 py-6 rounded-[2.5rem] font-black hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-xl shadow-indigo-200 active:scale-95 whitespace-nowrap text-xl tracking-tight"
               >
-                开始生成
+                开启深度学习
               </button>
             </div>
-            <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-6 text-slate-500">
-               <div className="flex flex-col items-center p-4">
-                 <div className="w-10 h-10 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-3"><i className="fas fa-waveform"></i></div>
-                 <p className="text-sm font-medium">真实音频提取</p>
-               </div>
-               <div className="flex flex-col items-center p-4">
-                 <div className="w-10 h-10 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center mb-3"><i className="fas fa-brain"></i></div>
-                 <p className="text-sm font-medium">Gemini 3.0 全文转录</p>
-               </div>
-               <div className="flex flex-col items-center p-4">
-                 <div className="w-10 h-10 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mb-3"><i className="fas fa-highlighter"></i></div>
-                 <p className="text-sm font-medium">智能观点提取</p>
-               </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+               {[
+                 { icon: 'fa-microchip', title: 'Gemini 转录', desc: '精准还原音频，移除无效冗余符号。', color: 'blue' },
+                 { icon: 'fa-highlighter', title: '即时划线', desc: '选中文本一键高亮，精准锚点跳转。', color: 'purple' },
+                 { icon: 'fa-magnifying-glass', title: '全局检索', desc: '在历史笔记中瞬间找回关键内容。', color: 'amber' }
+               ].map((feat, i) => (
+                 <div key={i} className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/5 transition-all group">
+                    <div className={`w-14 h-14 bg-${feat.color}-50 text-${feat.color}-500 rounded-2xl flex items-center justify-center mb-8 group-hover:scale-110 group-hover:rotate-3 transition-all`}>
+                      <i className={`fas ${feat.icon} text-2xl`}></i>
+                    </div>
+                    <h4 className="text-xl font-black mb-3 text-slate-800">{feat.title}</h4>
+                    <p className="text-slate-400 text-sm leading-relaxed font-bold">{feat.desc}</p>
+                 </div>
+               ))}
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            {/* Left Column */}
-            <div className="lg:col-span-4 space-y-6">
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 sticky top-20">
-                <h2 className="text-xl font-bold text-slate-800 mb-5 line-clamp-2 leading-tight">{session.title}</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 animate-in fade-in duration-500">
+            {/* 左侧栏 */}
+            <div className="lg:col-span-4 space-y-10">
+              <div className="bg-white p-10 rounded-[3rem] shadow-xl shadow-slate-200/50 border border-slate-100 sticky top-28">
+                <h2 className="text-2xl font-black text-slate-900 mb-8 line-clamp-2 leading-tight tracking-tighter">{session.title}</h2>
+                
                 <AudioPlayer 
                   audioRef={audioRef}
                   src={session.audioUrl}
@@ -237,19 +280,20 @@ const App: React.FC = () => {
                   highlights={session.highlights}
                   onSeek={handleSeek}
                 />
-                <div className="flex gap-3 mt-8">
+                
+                <div className="grid grid-cols-2 gap-4 mt-12">
                   <button 
                     onClick={() => handleExport('md')}
-                    className="flex-1 text-xs font-bold py-3 bg-slate-50 text-slate-700 rounded-xl hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                    className="flex items-center justify-center gap-2 py-4 bg-indigo-50 text-indigo-700 font-black rounded-2xl hover:bg-indigo-600 hover:text-white transition-all text-xs tracking-widest uppercase"
                   >
-                    <i className="fas fa-file-export mr-2"></i>
-                    导出笔记
+                    <i className="fas fa-file-markdown"></i>
+                    导出 MD
                   </button>
                   <button 
                     onClick={() => setSession(null)}
-                    className="px-5 text-xs font-bold py-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-red-50 hover:text-red-600 transition-all"
+                    className="flex items-center justify-center py-4 bg-slate-50 text-slate-300 font-black rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all text-xs tracking-widest uppercase"
                   >
-                    <i className="fas fa-redo"></i>
+                    返回首页
                   </button>
                 </div>
               </div>
@@ -263,64 +307,70 @@ const App: React.FC = () => {
               <TerminologyQuery />
             </div>
 
-            {/* Right Column */}
-            <div className="lg:col-span-8 space-y-6">
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                <div className="border-b border-slate-100 bg-white px-6 py-5 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center"><i className="fas fa-quote-right text-xs"></i></div>
-                    <h3 className="font-bold text-slate-800">转录文本</h3>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Live Transcription</span>
+            {/* 右侧栏 */}
+            <div className="lg:col-span-8 space-y-12">
+              <div className="bg-white rounded-[3.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
+                <div className="px-12 py-10 border-b border-slate-50 flex items-center justify-between">
+                  <div className="flex items-center gap-5">
+                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-[1.25rem] flex items-center justify-center shadow-inner">
+                      <i className="fas fa-book-open"></i>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 tracking-tighter">沉浸式阅读转录本</h3>
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">Bionic Reading Experience</p>
+                    </div>
                   </div>
                 </div>
                 <Transcript 
                   text={session.transcript} 
-                  highlights={session.highlights}
-                  onTextSelect={(text, ts) => setSelectedRange({ text, timestamp: ts })}
+                  notes={session.notes}
+                  onAction={handleAction}
                   onSeek={handleSeek}
                   activeTime={currentTime}
                 />
               </div>
 
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                <div className="border-b border-slate-100 bg-white px-6 py-5 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center"><i className="fas fa-pen text-xs"></i></div>
-                    <h3 className="font-bold text-slate-800">我的笔记 ({session.notes.length})</h3>
+              <div className="bg-white rounded-[3.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
+                <div className="px-12 py-10 border-b border-slate-50 flex items-center justify-between">
+                  <div className="flex items-center gap-5">
+                    <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-[1.25rem] flex items-center justify-center shadow-inner">
+                      <i className="fas fa-pen-fancy"></i>
+                    </div>
+                    <h3 className="text-xl font-black text-slate-800 tracking-tighter">知识笔记 & 划线 ({session.notes.length})</h3>
                   </div>
                 </div>
-                <div className="p-8 space-y-8 max-h-[600px] overflow-y-auto bg-slate-50/10">
+                <div className="p-12 space-y-12 max-h-[800px] overflow-y-auto bg-slate-50/20">
                   {session.notes.length === 0 ? (
-                    <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <i className="fas fa-edit text-slate-200 text-2xl"></i>
+                    <div className="text-center py-32 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-100 mx-4">
+                      <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-10">
+                        <i className="fas fa-edit text-slate-100 text-4xl"></i>
                       </div>
-                      <p className="text-slate-400 font-medium">暂时没有笔记。选中上方文字即可开始记录。</p>
+                      <p className="text-slate-400 font-black text-xl tracking-tight">在这里留下您的第一个思考</p>
+                      <p className="text-slate-300 text-sm mt-3 font-bold">划选上方文字即可开启记录</p>
                     </div>
                   ) : (
                     session.notes.map(note => (
-                      <div key={note.id} className="group relative animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <div className="flex items-center justify-between mb-4">
+                      <div key={note.id} className="group relative animate-in fade-in slide-in-from-bottom-6 duration-700">
+                        <div className="flex items-center justify-between mb-6">
                           <button 
                             onClick={() => handleSeek(note.timestamp)}
-                            className="text-xs font-bold text-indigo-600 bg-indigo-50/50 hover:bg-indigo-100 px-4 py-2 rounded-xl transition-all flex items-center"
+                            className="text-xs font-black text-indigo-600 bg-white shadow-xl shadow-indigo-500/10 border border-indigo-50 px-6 py-3 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-3 active:scale-95"
                           >
-                            <i className="fas fa-play-circle mr-2 text-sm"></i>
+                            <i className="fas fa-play text-[10px]"></i>
                             {formatTime(note.timestamp)}
                           </button>
-                          <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">
-                            {new Date(note.createdAt).toLocaleTimeString()}
+                          <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">
+                            {new Date(note.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        <div className="pl-5 border-l-2 border-indigo-200 mb-4 italic text-slate-500 text-base leading-relaxed">
+                        <div className={`pl-8 border-l-[6px] ${note.isOnlyHighlight ? 'border-amber-400' : 'border-indigo-600'} mb-6 italic text-slate-600 text-xl leading-relaxed font-bold`}>
                           “{note.selectedText}”
                         </div>
-                        <div className="text-slate-800 text-base leading-relaxed bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                          {note.text}
-                        </div>
+                        {!note.isOnlyHighlight && (
+                          <div className="text-slate-800 text-lg leading-relaxed bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 font-bold tracking-tight">
+                            {note.text}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -330,6 +380,17 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <footer className="py-24 text-center">
+          <div className="flex items-center justify-center gap-6 mb-8 opacity-20">
+            <div className="h-[2px] w-16 bg-slate-400 rounded-full"></div>
+            <i className="fas fa-podcast text-slate-400 text-2xl"></i>
+            <div className="h-[2px] w-16 bg-slate-400 rounded-full"></div>
+          </div>
+          <p className="text-slate-400 text-xs font-black uppercase tracking-[0.4em] flex items-center justify-center">
+             Crafted for Knowledge Seekers <span className="mx-4 text-indigo-600">●</span> 2024
+          </p>
+      </footer>
 
       {showHistory && (
         <HistoryList 
@@ -351,12 +412,6 @@ const App: React.FC = () => {
           onCancel={() => setSelectedRange(null)}
         />
       )}
-      
-      <footer className="py-12 text-center border-t border-slate-100 bg-white mt-auto">
-          <p className="text-slate-400 text-sm font-medium flex items-center justify-center">
-             基于 <span className="mx-1.5 px-2 py-0.5 bg-indigo-600 text-white rounded text-[10px] font-black uppercase">Gemini 3.0</span> 的真·智能播客笔记
-          </p>
-      </footer>
     </div>
   );
 };
